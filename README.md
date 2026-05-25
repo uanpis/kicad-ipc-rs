@@ -44,7 +44,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-kicad-ipc-rs = "0.4.1"
+kicad-ipc-rs = "0.5.0"
 tokio = { version = "1", features = ["macros", "rt"] }
 ```
 
@@ -69,7 +69,7 @@ async fn main() -> Result<(), kicad_ipc_rs::KiCadError> {
         
         // Get all tracks on the board
         let tracks = client.get_items_by_type_codes(vec![
-            kicad_ipc_rs::PcbObjectTypeCode::new_trace()
+            kicad_ipc_rs::PcbObjectTypeCode::new_trace().code
         ]).await?;
         println!("Found {} tracks", tracks.len());
     }
@@ -84,7 +84,7 @@ Enable the `blocking` feature for synchronous applications:
 
 ```toml
 [dependencies]
-kicad-ipc-rs = { version = "0.4.1", features = ["blocking"] }
+kicad-ipc-rs = { version = "0.5.0", features = ["blocking"] }
 ```
 
 ```rust
@@ -110,21 +110,36 @@ fn main() -> Result<(), kicad_ipc_rs::KiCadError> {
 All board modifications use commit sessions for safety:
 
 ```rust
-use kicad_ipc_rs::{KiCadClient, CommitAction};
+use kicad_ipc_rs::{
+    BoardTextSpec, CommitAction, KiCadClient, TextAttributesSpec, TextHorizontalAlignment,
+    TextVerticalAlignment, Vector2Nm,
+};
 
-async fn add_track(client: &KiCadClient) -> Result<(), kicad_ipc_rs::KiCadError> {
+async fn add_silkscreen_text(client: &KiCadClient) -> Result<(), kicad_ipc_rs::KiCadError> {
     // Start a commit session
     let commit = client.begin_commit().await?;
-    
-    // Create items (tracks, vias, footprints, etc.)
-    let items = vec![/* your PcbItem instances */];
-    let created_ids = client.create_items(items).await?;
+
+    // Create board text through typed CreateItems, matching kicad-python's BoardText flow.
+    let attributes = TextAttributesSpec {
+        horizontal_alignment: TextHorizontalAlignment::Center,
+        vertical_alignment: TextVerticalAlignment::Center,
+        stroke_width_nm: Some(150_000),
+        size_nm: Some(Vector2Nm { x_nm: 1_500_000, y_nm: 1_500_000 }),
+        ..TextAttributesSpec::default()
+    };
+    let created = client
+        .create_board_text(BoardTextSpec::front_silkscreen(
+            "IPC OK",
+            Vector2Nm { x_nm: 186_000_000, y_nm: 90_500_000 },
+            Some(attributes),
+        ))
+        .await?;
     
     // Commit the changes
     client.end_commit(
-        commit.id,
+        commit,
         CommitAction::Commit,
-        "Added new track"
+        format!("Added text {}", created.id.unwrap_or_default())
     ).await?;
     
     Ok(())
@@ -159,6 +174,11 @@ client.update_editable_items(items).await?;
 
 `EditablePcbItem` wrappers also expose `proto()` / `proto_mut()` / `into_proto()` as advanced
 escape hatches when you need direct protobuf access.
+
+For board text and silkscreen creation, prefer `create_board_text` / `create_board_texts`.
+These helpers send typed `CreateItems` payloads, matching kicad-python's direct `BoardText`
+flow. `get_all_pcb_items*` uses one combined `GetItems` request and fails if KiCad returns an
+unmapped item type, so returned payloads are not silently dropped.
 
 ## Examples
 Run the included examples against a running KiCad instance:
@@ -216,7 +236,7 @@ All 59 KiCad v10.0.1 API commands are implemented:
 | `RevertDocument` | `KiCadClient::revert_document` |
 | `RunAction` | `KiCadClient::run_action` |
 | `BeginCommit` / `EndCommit` | `KiCadClient::begin_commit`, `end_commit` |
-| `CreateItems` | `KiCadClient::create_items` |
+| `CreateItems` | `KiCadClient::create_items`, `create_editable_items`, `create_board_text`, `create_board_texts` |
 | `GetItems` | `KiCadClient::get_items_by_type_codes`, `get_all_pcb_items`, `get_pad_netlist` |
 | `GetItemsById` | `KiCadClient::get_items_by_id` |
 | `UpdateItems` | `KiCadClient::update_items` |
