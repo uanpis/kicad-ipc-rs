@@ -154,61 +154,148 @@ pub(crate) fn decode_pcb_item(item: prost_types::Any) -> Result<PcbItem, KiCadEr
     }
 
     if item.type_url == envelope::type_url("kiapi.board.types.FootprintInstance") {
-        let footprint = decode_any::<board_types::FootprintInstance>(
+        let footprint_instance = decode_any::<board_types::FootprintInstance>(
             &item,
             "kiapi.board.types.FootprintInstance",
         )?;
-        let reference = footprint
+        let reference = footprint_instance
             .reference_field
             .as_ref()
             .and_then(|field| field.text.as_ref())
             .and_then(|board_text| board_text.text.as_ref())
             .map(|text| text.text.clone())
             .filter(|value| !value.is_empty());
-        let value = footprint
+        let definition = footprint_instance.definition.map(|footprint| {
+            let reference = footprint
+                .reference_field
+                .as_ref()
+                .and_then(|field| field.text.as_ref())
+                .and_then(|board_text| board_text.text.as_ref())
+                .map(|text| text.text.clone())
+                .filter(|value| !value.is_empty());
+            let value = footprint
+                .value_field
+                .as_ref()
+                .and_then(|field| field.text.as_ref())
+                .and_then(|board_text| board_text.text.as_ref())
+                .map(|text| text.text.clone())
+                .filter(|value| !value.is_empty());
+            let datasheet = footprint
+                .datasheet_field
+                .as_ref()
+                .and_then(|field| field.text.as_ref())
+                .and_then(|board_text| board_text.text.as_ref())
+                .map(|text| text.text.clone())
+                .filter(|value| !value.is_empty());
+            let description = footprint
+                .description_field
+                .as_ref()
+                .and_then(|field| field.text.as_ref())
+                .and_then(|board_text| board_text.text.as_ref())
+                .map(|text| text.text.clone())
+                .filter(|value| !value.is_empty());
+
+            let attributes = footprint
+                .attributes
+                .map(|attribute| PcbFootprintAttributes {
+                    description: attribute.description,
+                    keywords: attribute.keywords,
+                    not_in_schematic: attribute.not_in_schematic,
+                    exclude_from_position_files: attribute.exclude_from_position_files,
+                    exclude_from_bill_of_materials: attribute.exclude_from_bill_of_materials,
+                    exempt_from_courtyard_requirement: attribute.exempt_from_courtyard_requirement,
+                    do_not_populate: attribute.do_not_populate,
+                    mounting_style: attribute.mounting_style,
+                    allow_soldermask_bridges: attribute.allow_soldermask_bridges,
+                });
+            let overrides = footprint
+                .overrides
+                .map(|ovr| PcbFootprintDesignRuleOverrides {
+                    solder_mask: ovr.solder_mask.map(|mask| PcbSolderMaskOverrides {
+                        solder_mask_margin_nm: map_optional_distance_nm(mask.solder_mask_margin),
+                    }),
+                    solder_paste: ovr.solder_paste.map(|paste| PcbSolderPasteOverrides {
+                        solder_paste_margin_nm: map_optional_distance_nm(paste.solder_paste_margin),
+                        solder_paste_margin_ratio: paste
+                            .solder_paste_margin_ratio
+                            .map(|ratio| ratio.value),
+                    }),
+                    copper_clearance_nm: map_optional_distance_nm(ovr.copper_clearance),
+                    zone_connection: ovr.zone_connection,
+                });
+            let net_ties = footprint
+                .net_ties
+                .iter()
+                .map(|tie| tie.pad_number.clone())
+                .collect();
+            let items = footprint
+                .items
+                .iter()
+                .flat_map(|item| decode_pcb_item(item.clone()))
+                .collect();
+            let jumpers = footprint.jumpers.map(|jumper| PcbJumperSettings {
+                duplicate_names_are_jumpered: jumper.duplicate_names_are_jumpered,
+                groups: jumper
+                    .groups
+                    .iter()
+                    .map(|group| group.pad_names.clone())
+                    .collect(),
+            });
+
+            PcbFootprint {
+                id: footprint.id.as_ref().map(|id| id.entry_name.clone()),
+                anchor: footprint.anchor.map(map_vector2_nm),
+                attributes,
+                overrides,
+                net_ties,
+                private_layers: footprint.private_layers,
+                reference,
+                value,
+                datasheet,
+                description,
+                items,
+                jumpers,
+            }
+        });
+        let value = footprint_instance
             .value_field
             .as_ref()
             .and_then(|field| field.text.as_ref())
             .and_then(|board_text| board_text.text.as_ref())
             .map(|text| text.text.clone())
             .filter(|value| !value.is_empty());
-        let datasheet = footprint
+        let datasheet = footprint_instance
             .datasheet_field
             .as_ref()
             .and_then(|field| field.text.as_ref())
             .and_then(|board_text| board_text.text.as_ref())
             .map(|text| text.text.clone())
             .filter(|value| !value.is_empty());
-        let description = footprint
+        let description = footprint_instance
             .description_field
             .as_ref()
             .and_then(|field| field.text.as_ref())
             .and_then(|board_text| board_text.text.as_ref())
             .map(|text| text.text.clone())
             .filter(|value| !value.is_empty());
-        let definition_item_count = footprint
-            .definition
-            .as_ref()
-            .map(|definition| definition.items.len())
-            .unwrap_or(0);
-        let pad_count = footprint
-            .definition
+        let definition_item_count = definition.as_ref().map(|d| d.items.len()).unwrap_or(0);
+        let pad_count = definition
             .as_ref()
             .map(|definition| {
                 definition
                     .items
                     .iter()
-                    .filter(|entry| entry.type_url == envelope::type_url("kiapi.board.types.Pad"))
+                    .filter(|entry| matches!(entry, PcbItem::Pad(_)))
                     .count()
             })
             .unwrap_or(0);
-        let symbol_sheet_name = (!footprint.symbol_sheet_name.is_empty())
-            .then_some(footprint.symbol_sheet_name.clone());
-        let symbol_sheet_filename = (!footprint.symbol_sheet_filename.is_empty())
-            .then_some(footprint.symbol_sheet_filename.clone());
-        let symbol_footprint_filters = (!footprint.symbol_footprint_filters.is_empty())
-            .then_some(footprint.symbol_footprint_filters.clone());
-        let has_symbol_path = footprint.symbol_path.is_some();
+        let symbol_sheet_name = (!footprint_instance.symbol_sheet_name.is_empty())
+            .then_some(footprint_instance.symbol_sheet_name.clone());
+        let symbol_sheet_filename = (!footprint_instance.symbol_sheet_filename.is_empty())
+            .then_some(footprint_instance.symbol_sheet_filename.clone());
+        let symbol_footprint_filters = (!footprint_instance.symbol_footprint_filters.is_empty())
+            .then_some(footprint_instance.symbol_footprint_filters.clone());
+        let has_symbol_path = footprint_instance.symbol_path.is_some();
         let symbol_link = if has_symbol_path
             || symbol_sheet_name.is_some()
             || symbol_sheet_filename.is_some()
@@ -224,22 +311,25 @@ pub(crate) fn decode_pcb_item(item: prost_types::Any) -> Result<PcbItem, KiCadEr
             None
         };
 
-        return Ok(PcbItem::Footprint(PcbFootprint {
-            id: footprint.id.map(|id| id.value),
+        return Ok(PcbItem::FootprintInstance(PcbFootprintInstance {
+            id: footprint_instance.id.map(|id| id.value),
             reference,
-            position_nm: footprint.position.map(map_vector2_nm),
-            orientation_deg: footprint.orientation.map(|angle| angle.value_degrees),
-            layer: layer_to_model(footprint.layer),
-            locked: map_lock_state(footprint.locked),
+            position_nm: footprint_instance.position.map(map_vector2_nm),
+            orientation_deg: footprint_instance
+                .orientation
+                .map(|angle| angle.value_degrees),
+            layer: layer_to_model(footprint_instance.layer),
+            locked: map_lock_state(footprint_instance.locked),
             value,
             datasheet,
             description,
-            has_attributes: footprint.attributes.is_some(),
-            has_overrides: footprint.overrides.is_some(),
-            has_definition: footprint.definition.is_some(),
+            has_attributes: footprint_instance.attributes.is_some(),
+            has_overrides: footprint_instance.overrides.is_some(),
+            has_definition: definition.as_ref().is_some(),
             definition_item_count,
             symbol_link,
             pad_count,
+            definition,
         }));
     }
 

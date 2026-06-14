@@ -647,13 +647,14 @@ pub struct PcbVia {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct PcbFootprint {
+pub struct PcbFootprintInstance {
     pub id: Option<String>,
     pub reference: Option<String>,
     pub position_nm: Option<Vector2Nm>,
     pub orientation_deg: Option<f64>,
     pub layer: BoardLayerInfo,
     pub locked: ItemLockState,
+    pub definition: Option<PcbFootprint>,
     pub value: Option<String>,
     pub datasheet: Option<String>,
     pub description: Option<String>,
@@ -663,6 +664,65 @@ pub struct PcbFootprint {
     pub definition_item_count: usize,
     pub symbol_link: Option<PcbFootprintSymbolLink>,
     pub pad_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PcbFootprintAttributes {
+    pub description: String,
+    pub keywords: String,
+    pub not_in_schematic: bool,
+    pub exclude_from_position_files: bool,
+    pub exclude_from_bill_of_materials: bool,
+    pub exempt_from_courtyard_requirement: bool,
+    pub do_not_populate: bool,
+    pub mounting_style: i32,
+    /// Since: 9.0.7
+    pub allow_soldermask_bridges: bool,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq)]
+pub struct PcbFootprintDesignRuleOverrides {
+    pub solder_mask: Option<PcbSolderMaskOverrides>,
+    pub solder_paste: Option<PcbSolderPasteOverrides>,
+    pub copper_clearance_nm: Option<i64>,
+    pub zone_connection: i32,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
+pub struct PcbSolderMaskOverrides {
+    /// Solder mask expansion/contraction
+    pub solder_mask_margin_nm: Option<i64>,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq)]
+pub struct PcbSolderPasteOverrides {
+    /// Solder paste expansion/contraction
+    pub solder_paste_margin_nm: Option<i64>,
+    /// Solder paste expansion/contraction ratio
+    pub solder_paste_margin_ratio: Option<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PcbJumperSettings {
+    /// / If true, duplicate pad names in this footprint are jumpered together
+    pub duplicate_names_are_jumpered: bool,
+    pub groups: Vec<Vec<String>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PcbFootprint {
+    pub id: Option<String>,
+    pub anchor: Option<Vector2Nm>,
+    pub attributes: Option<PcbFootprintAttributes>,
+    pub overrides: Option<PcbFootprintDesignRuleOverrides>,
+    pub net_ties: Vec<Vec<String>>,
+    pub private_layers: Vec<i32>,
+    pub reference: Option<String>,
+    pub value: Option<String>,
+    pub datasheet: Option<String>,
+    pub description: Option<String>,
+    pub items: Vec<PcbItem>,
+    pub jumpers: Option<PcbJumperSettings>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -834,7 +894,7 @@ pub enum PcbItem {
     Track(PcbTrack),
     Arc(PcbArc),
     Via(PcbVia),
-    Footprint(PcbFootprint),
+    FootprintInstance(PcbFootprintInstance),
     Pad(PcbPad),
     BoardGraphicShape(PcbBoardGraphicShape),
     BoardText(PcbBoardText),
