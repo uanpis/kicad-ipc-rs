@@ -631,6 +631,104 @@ pub(crate) fn map_optional_net(net: Option<board_types::Net>) -> Option<BoardNet
     })
 }
 
+pub(crate) fn map_footprint(
+    fp: Option<board_types::Footprint>,
+    decode_pcb_item: impl Fn(prost_types::Any) -> Result<PcbItem, KiCadError>,
+) -> Option<PcbFootprint> {
+    fp.map(|footprint| {
+        let reference = footprint
+            .reference_field
+            .as_ref()
+            .and_then(|field| field.text.as_ref())
+            .and_then(|board_text| board_text.text.as_ref())
+            .map(|text| text.text.clone())
+            .filter(|value| !value.is_empty());
+        let value = footprint
+            .value_field
+            .as_ref()
+            .and_then(|field| field.text.as_ref())
+            .and_then(|board_text| board_text.text.as_ref())
+            .map(|text| text.text.clone())
+            .filter(|value| !value.is_empty());
+        let datasheet = footprint
+            .datasheet_field
+            .as_ref()
+            .and_then(|field| field.text.as_ref())
+            .and_then(|board_text| board_text.text.as_ref())
+            .map(|text| text.text.clone())
+            .filter(|value| !value.is_empty());
+        let description = footprint
+            .description_field
+            .as_ref()
+            .and_then(|field| field.text.as_ref())
+            .and_then(|board_text| board_text.text.as_ref())
+            .map(|text| text.text.clone())
+            .filter(|value| !value.is_empty());
+
+        let attributes = footprint
+            .attributes
+            .map(|attribute| PcbFootprintAttributes {
+                description: attribute.description,
+                keywords: attribute.keywords,
+                not_in_schematic: attribute.not_in_schematic,
+                exclude_from_position_files: attribute.exclude_from_position_files,
+                exclude_from_bill_of_materials: attribute.exclude_from_bill_of_materials,
+                exempt_from_courtyard_requirement: attribute.exempt_from_courtyard_requirement,
+                do_not_populate: attribute.do_not_populate,
+                mounting_style: attribute.mounting_style,
+                allow_soldermask_bridges: attribute.allow_soldermask_bridges,
+            });
+        let overrides = footprint
+            .overrides
+            .map(|ovr| PcbFootprintDesignRuleOverrides {
+                solder_mask: ovr.solder_mask.map(|mask| PcbSolderMaskOverrides {
+                    solder_mask_margin_nm: map_optional_distance_nm(mask.solder_mask_margin),
+                }),
+                solder_paste: ovr.solder_paste.map(|paste| PcbSolderPasteOverrides {
+                    solder_paste_margin_nm: map_optional_distance_nm(paste.solder_paste_margin),
+                    solder_paste_margin_ratio: paste
+                        .solder_paste_margin_ratio
+                        .map(|ratio| ratio.value),
+                }),
+                copper_clearance_nm: map_optional_distance_nm(ovr.copper_clearance),
+                zone_connection: ovr.zone_connection,
+            });
+        let net_ties = footprint
+            .net_ties
+            .iter()
+            .map(|tie| tie.pad_number.clone())
+            .collect();
+        let items = footprint
+            .items
+            .iter()
+            .flat_map(|item| decode_pcb_item(item.clone()))
+            .collect();
+        let jumpers = footprint.jumpers.map(|jumper| PcbJumperSettings {
+            duplicate_names_are_jumpered: jumper.duplicate_names_are_jumpered,
+            groups: jumper
+                .groups
+                .iter()
+                .map(|group| group.pad_names.clone())
+                .collect(),
+        });
+
+        PcbFootprint {
+            id: footprint.id.as_ref().map(|id| id.entry_name.clone()),
+            anchor: footprint.anchor.map(map_vector2_nm),
+            attributes,
+            overrides,
+            net_ties,
+            private_layers: footprint.private_layers,
+            reference,
+            value,
+            datasheet,
+            description,
+            items,
+            jumpers,
+        }
+    })
+}
+
 pub(crate) fn map_padstack_presence(value: i32) -> PadstackPresenceState {
     match board_commands::PadstackPresence::try_from(value) {
         Ok(board_commands::PadstackPresence::PspPresent) => PadstackPresenceState::Present,
