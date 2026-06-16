@@ -6,17 +6,6 @@ use crate::error::KiCadError;
 use crate::model::board::*;
 use crate::proto::kiapi::board::types as board_types;
 use crate::proto::kiapi::common::types as common_types;
-pub(crate) fn map_graphic_shape_kind(shape: Option<&common_types::GraphicShape>) -> Option<String> {
-    let geometry = shape?.geometry.as_ref()?;
-    Some(match geometry {
-        common_types::graphic_shape::Geometry::Segment(_) => "SEGMENT".to_string(),
-        common_types::graphic_shape::Geometry::Rectangle(_) => "RECTANGLE".to_string(),
-        common_types::graphic_shape::Geometry::Arc(_) => "ARC".to_string(),
-        common_types::graphic_shape::Geometry::Circle(_) => "CIRCLE".to_string(),
-        common_types::graphic_shape::Geometry::Polygon(_) => "POLYGON".to_string(),
-        common_types::graphic_shape::Geometry::Bezier(_) => "BEZIER".to_string(),
-    })
-}
 
 pub(crate) fn map_dimension_style(
     style: Option<board_types::dimension::DimensionStyle>,
@@ -274,46 +263,9 @@ pub(crate) fn decode_pcb_item(item: prost_types::Any) -> Result<PcbItem, KiCadEr
             &item,
             "kiapi.board.types.BoardGraphicShape",
         )?;
-        let geometry_kind = map_graphic_shape_kind(shape.shape.as_ref());
-        let geometry = map_graphic_shape_geometry(shape.shape.as_ref());
-        let stroke_width_nm = shape
-            .shape
-            .as_ref()
-            .and_then(|graphic| graphic.attributes.as_ref())
-            .and_then(|attrs| attrs.stroke.as_ref())
-            .and_then(|stroke| stroke.width)
-            .map(|width| width.value_nm);
-        let stroke_style = shape
-            .shape
-            .as_ref()
-            .and_then(|graphic| graphic.attributes.as_ref())
-            .and_then(|attrs| attrs.stroke.as_ref())
-            .map(|stroke| {
-                common_types::StrokeLineStyle::try_from(stroke.style)
-                    .map(|value| value.as_str_name().to_string())
-                    .unwrap_or_else(|_| format!("UNKNOWN({})", stroke.style))
-            });
-        let fill_type = shape
-            .shape
-            .as_ref()
-            .and_then(|graphic| graphic.attributes.as_ref())
-            .and_then(|attrs| attrs.fill.as_ref())
-            .map(|fill| {
-                common_types::GraphicFillType::try_from(fill.fill_type)
-                    .map(|value| value.as_str_name().to_string())
-                    .unwrap_or_else(|_| format!("UNKNOWN({})", fill.fill_type))
-            });
-        return Ok(PcbItem::BoardGraphicShape(PcbBoardGraphicShape {
-            id: shape.id.map(|id| id.value),
-            layer: layer_to_model(shape.layer),
-            locked: map_lock_state(shape.locked),
-            net: map_optional_net(shape.net),
-            geometry_kind,
-            geometry,
-            stroke_width_nm,
-            stroke_style,
-            fill_type,
-        }));
+        return Ok(PcbItem::BoardGraphicShape(decode_board_graphic_shape(
+            &shape,
+        )));
     }
 
     if item.type_url == envelope::type_url("kiapi.board.types.BoardText") {
